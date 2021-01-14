@@ -1,14 +1,16 @@
 from flask import Flask
 from flask_restx import Resource, Api, fields, reqparse
-import pymysql
+import psycopg2 as pg
 from secrets import token_urlsafe
 import datetime
 
 # Usefull ressources :
-## https://flask-restplus.readthedocs.io/en/stable/index.html
-## https://blog.invivoo.com/designer-des-apis-rest-avec-flask-restplus/
-## https://fr.wikipedia.org/wiki/Liste_des_codes_HTTP
-## http://filldb.info/
+"""
+https://flask-restplus.readthedocs.io/en/stable/index.html
+https://blog.invivoo.com/designer-des-apis-rest-avec-flask-restplus/
+https://fr.wikipedia.org/wiki/Liste_des_codes_HTTP
+http://filldb.info/
+"""
 
 # Config Flask App Definition
 app = Flask(__name__)
@@ -23,23 +25,24 @@ namespace_posts = api.namespace(name='articles', description="Fonctions API d'af
 db_host = "mydb"
 # db_host = "localhost"
 try:
-    db=pymysql.connect(
+    db = pg.connect(
         host=db_host,
-        user="root",
-        passwd="root",
-        db="mydb")
-except (pymysql.err.InternalError, pymysql.err.OperationalError) as e:
+        user="API_Access",
+        passwd="API_Access",
+        db="BlogDB")
+except (pg.InternalError, pg.OperationalError) as e:
     print("La DB n'existe pas elle va etre cree")
     print(repr(e))
-    db=pymysql.connect(
+    db = pg.connect(
         host=db_host,
-        user="root",
-        passwd="root",
-        db="mysql")
-    sql = ["CREATE DATABASE mydb;","use mydb;"]
+        user="API_Access",
+        passwd="API_Access",
+        db="BlogDB")
+    sql = ["CREATE DATABASE BlogDB;","use BlogDB;"]
     with db.cursor() as cursor:
         for query in sql:
             cursor.execute(query)
+
 
 # Function for read sql file
 def get_sql_from_file(filename):
@@ -60,14 +63,15 @@ def get_sql_from_file(filename):
             ret.pop()
             return ret
 
+
 # Check if DB has content else create schema or sample data
 try:
     with db.cursor() as cursor:
         sql = "SELECT `id` FROM `posts` WHERE `id`=%s"
-        cursor.execute(sql, (1))
+        cursor.execute(sql, 1)
         result = cursor.fetchone()
         print("Il existe au moins un article dans la DB")
-        if result==None:
+        if result is None:
             print("Les tables de la DB sont vides on importe un peu de contenu")
             import_sql_filename = "./db_with_sampledata.sql"
             request_list = get_sql_from_file(import_sql_filename)
@@ -77,7 +81,7 @@ try:
                         print(sql_request)
                         cursor.execute(sql_request + ';')
                         db.commit()
-except pymysql.err.ProgrammingError:
+except pg.ProgrammingError:
     print("La DB est vide")
     import_sql_filename = "./db_schema.sql"
     request_list = get_sql_from_file(import_sql_filename)
@@ -111,6 +115,7 @@ users_arguments.add_argument('last_name')
 users_arguments.add_argument('email')
 users_arguments.add_argument('birthdate')
 
+
 ### DEMO with simple api function via HTTP GET in default namespace
 @api.route("/api/v1/ping")
 class Ping(Resource):
@@ -121,18 +126,22 @@ class Ping(Resource):
         """
         Test de l'API avec un simple ping
         """
-        return {'response':'pong'}, 200
+        return {'response': 'pong'}, 200
+
     @api.response(400, 'API Ping: This is a custom 400 error code')
     def delete(self):
         """
         Test de l'API avec erreur 400
         """
-        return {'response':'bad pong'}, 400
+        return {'response': 'bad pong'}, 400
+
     def post(self):
         """
         Test de l'API avec erreur 403
         """
-        return {'response':'pong'}, 200
+        return {'response': 'pong'}, 200
+
+
 @api.route("/api/v1/time")
 class Time(Resource):
     @api.response(200, 'Flask Time : Success')
@@ -143,9 +152,10 @@ class Time(Resource):
         """
         current_timestamp = datetime.datetime.now().timestamp()
         current_date = datetime.datetime.now()
-        return {'response':{
-                    'current_date':str(current_date),
-                    'current_timestamp':str(current_timestamp)}},200
+        return {'response': {
+                    'current_date': str(current_date),
+                    'current_timestamp': str(current_timestamp)}}, 200
+
 
 @namespace_user.route("/api/v1/user/<int:id>")
 class User(Resource):
@@ -155,10 +165,11 @@ class User(Resource):
         Retourner un utilisateur pour un ID donné
         """
         sql = "SELECT `id`, `first_name`, `last_name`, `email`, CAST(`birthdate` as CHAR) as birthdate, CAST(`added` AS CHAR) as added FROM `authors` WHERE `id`=%s;"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             cursor.execute(sql, id)
             result = cursor.fetchone()
         return result
+
     @api.doc(params={'id': 'ID de l\'utilisateur à supprimer'})
     @api.response(200, 'API User : Deleted with Success')
     @api.response(204, 'API User : User not found cant be deleted')
@@ -167,7 +178,7 @@ class User(Resource):
         Supprimer un utilisateur pour un ID donné
         """
         sql = "DELETE from authors WHERE id=%s RETURNING id"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             result = cursor.execute(sql, id)
             db.commit()
         if int(result) > 0:
@@ -175,6 +186,8 @@ class User(Resource):
         else:
             return {'error':'no user found to delete'}, 204
 # POST new user without specifying an ID in route (use autoincrement from mariadb)
+
+
 @namespace_user.route("/api/v1/user")
 class User(Resource):
     @api.expect(users_resource_fields, validate=True)
@@ -191,14 +204,16 @@ class User(Resource):
             last_id = cursor.lastrowid
         return {'user created with id':str(last_id)}, 200
 
+
 @namespace_users.route("/api/v1/users")
 class Users(Resource):
     def get(self):
         sql = "SELECT `id`, `first_name`, `last_name`, `email`, CAST(`birthdate` as CHAR) as birthdate, CAST(`added` AS CHAR) as added FROM `authors`;"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             cursor.execute(sql)
             result = cursor.fetchall()
         return result
+
 
 @namespace_posts.route("/api/v1/articles")
 class Articles(Resource):
@@ -220,13 +235,14 @@ class Articles(Resource):
         else:
             # sql = "SELECT `id`, `title`, `description`, `content`, (SELECT first_name FROM authors WHERE id=author_id) as author, CAST(`date` AS CHAR) as date FROM `posts`"
             sql = "SELECT `id`, `title`, `description`, `content`, `author_id`, CAST(`date` AS CHAR) as date FROM `posts` order by `id` DESC"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             try:
                 cursor.execute(sql)
                 result = cursor.fetchall()
             except Exception as e:
                 result = "Pas OU trop de résultat \nError:"+str(e)
         return result
+
 
 # GET / DELETE an article
 @namespace_post.route("/api/v1/article/<int:id>")
@@ -235,17 +251,19 @@ class Article(Resource):
     def get(self, id):
         # Retourner un article
         sql = "SELECT `id`, `title`, `description`, `content`, (SELECT first_name FROM authors WHERE id=author_id) as author, CAST(`date` AS CHAR) as date FROM `posts` WHERE `id`=%s"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             cursor.execute(sql, id)
             result = cursor.fetchone()
         return result
+
     @api.doc(params={'id': 'ID de l\'article à supprimer'})
     def delete(self, id):
         # Supprimer un article
         sql = "DELETE from posts WHERE id=%s"
-        with db.cursor(pymysql.cursors.DictCursor) as cursor:
+        with db.cursor(pg.cursors.DictCursor) as cursor:
             cursor.execute(sql, id)
             db.commit()
+
     @api.expect(posts_resource_fields, validate=True)
     @api.doc(params={'id': 'ID de l\'article à mettre à jour'})
     def put(self, id):
@@ -256,6 +274,7 @@ class Article(Resource):
             author_id = cursor.fetchone()
             cursor.execute(sql, (api.payload['title'], api.payload['description'], api.payload['content'], author_id, id))
             db.commit()
+
 
 # POST new article without specifying an ID (use autoincrement from mariadb) REQUIRE API_KEY !!
 @namespace_post.route("/api/v1/article")
@@ -277,6 +296,7 @@ class Article(Resource):
                 return last_id
             else:
                 return {'Error': 'Check your API Key'}
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port='5000', debug=True)
